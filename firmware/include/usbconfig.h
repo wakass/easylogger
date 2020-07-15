@@ -136,8 +136,8 @@ extern void usbEventResetReady(void);
 #define USB_CFG_DEVICE_VERSION  0x00, 0x01
 /* Version number of the device: Minor number first, then major number.
  */
-#define USB_CFG_VENDOR_NAME     'o', 'b', 'd', 'e', 'v', '.', 'a', 't'
-#define USB_CFG_VENDOR_NAME_LEN 8
+#define USB_CFG_VENDOR_NAME     'a', 't', '-', 'l', 'a', 'b', '.', 'n', 'l'
+#define USB_CFG_VENDOR_NAME_LEN 9
 /* These two values define the vendor name returned by the USB device. The name
  * must be given as a list of characters under single quotes. The characters
  * are interpreted as Unicode (UTF-16) entities.
@@ -146,7 +146,7 @@ extern void usbEventResetReady(void);
  * obdev's free shared VID/PID pair. See the file USBID-License.txt for
  * details.
  */
-#define USB_CFG_DEVICE_NAME     'E', 'a', 's', 'y', 'L', 'o', 'g', 'g', 'e', 'r'
+#define USB_CFG_DEVICE_NAME     'C', 'r', 'y', 's', 't', 'a', 'l', 'b', 'o', 'i'
 #define USB_CFG_DEVICE_NAME_LEN 10
 /* Same as above for the device name. If you don't want a device name, undefine
  * the macros. See the file USBID-License.txt before you assign a name if you
