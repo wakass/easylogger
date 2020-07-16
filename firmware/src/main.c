@@ -20,16 +20,12 @@
 
 /*
 Pin assignment:
-PB1 = key input (active low with pull-up)
-PB3 = analog input (ADC3)
-PB4 = LED output (active high)
+PB0 = Test-clock output
 
-PB0, PB2 = USB data lines
+PB3, PB4 = USB data lines, see usbconfig.h
 */
 
-#define BIT_LED PB4
-#define BIT_KEY PB1
-
+#define BIT_OUT PB0
 
 #define UTIL_BIN4(x)        (uchar)((0##x & 01000)/64 + (0##x & 0100)/16 + (0##x & 010)/4 + (0##x & 1))
 #define UTIL_BIN8(hi, lo)   (uchar)(UTIL_BIN4(hi) * 16 + UTIL_BIN4(lo))
@@ -43,10 +39,6 @@ PB0, PB2 = USB data lines
 static uchar    reportBuffer[2];    /* buffer for HID reports */
 static uchar    idleRate;           /* in 4 ms units */
 
-static uchar    adcPending;
-static uchar    isRecording;
-
-static uchar    valueBuffer[16];
 static uchar    *nextDigit;
 
 /* ------------------------------------------------------------------------- */
@@ -107,6 +99,18 @@ PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] 
 
 /* ------------------------------------------------------------------------- */
 
+static void timerInit(void)
+{
+    TCCR0A = 1 << COM0A0; //Toggle OC0A on compare-match
+    TCCR0A |= 1 << WGM01; //CTC mode so that OCR0A controls match
+    TCCR0B  = 1 << CS00; //No prescaling i.e. scaling of clk_IO/1
+
+    TIMSK |= 1 << OCIE0A; //Enable timer counter compare match
+    OCR0A = 3; //TOP of timer counter 0; Generate interrupts on /4 speed
+    DDRB |= 1 << DDB0;
+
+}
+
 static void buildReport(void)
 {
 uchar   key = 0;
@@ -116,93 +120,6 @@ uchar   key = 0;
     }
     reportBuffer[0] = 0;    /* no modifiers */
     reportBuffer[1] = key;
-}
-
-static void evaluateADC(unsigned int value)
-{
-uchar   digit;
-
-    value += value + (value >> 1);  /* value = value * 2.5 for output in mV */
-    nextDigit = &valueBuffer[sizeof(valueBuffer)];
-    *--nextDigit = 0xff;/* terminate with 0xff */
-    *--nextDigit = 0;
-    *--nextDigit = KEY_RETURN;
-    do{
-        digit = value % 10;
-        value /= 10;
-        *--nextDigit = 0;
-        if(digit == 0){
-            *--nextDigit = KEY_0;
-        }else{
-            *--nextDigit = KEY_1 - 1 + digit;
-        }
-    }while(value != 0);
-}
-
-/* ------------------------------------------------------------------------- */
-
-static void setIsRecording(uchar newValue)
-{
-    isRecording = newValue;
-    if(isRecording){
-        PORTB |= 1 << BIT_LED;      /* LED on */
-    }else{
-        PORTB &= ~(1 << BIT_LED);   /* LED off */
-    }
-}
-
-/* ------------------------------------------------------------------------- */
-
-static void keyPoll(void)
-{
-static uchar    keyMirror;
-uchar           key;
-
-    key = PINB & (1 << BIT_KEY);
-    if(keyMirror != key){   /* status changed */
-        keyMirror = key;
-        if(!key){           /* key was pressed */
-            setIsRecording(!isRecording);
-        }
-    }
-}
-
-static void adcPoll(void)
-{
-    if(adcPending && !(ADCSRA & (1 << ADSC))){
-        adcPending = 0;
-        evaluateADC(ADC);
-    }
-}
-
-static void timerPoll(void)
-{
-static uchar timerCnt;
-
-    if(TIFR & (1 << TOV1)){
-        TIFR = (1 << TOV1); /* clear overflow */
-        keyPoll();
-        if(++timerCnt >= 63){       /* ~ 1 second interval */
-            timerCnt = 0;
-            if(isRecording){
-                adcPending = 1;
-                ADCSRA |= (1 << ADSC);  /* start next conversion */
-            }
-        }
-    }
-}
-
-/* ------------------------------------------------------------------------- */
-
-static void timerInit(void)
-{
-    TCCR1 = 0x0b;           /* select clock: 16.5M/1k -> overflow rate = 16.5M/256k = 62.94 Hz */
-}
-
-static void adcInit(void)
-{
-    ADMUX = UTIL_BIN8(1001, 0011);  /* Vref=2.56V, measure ADC0 */
-    ADCSRA = UTIL_BIN8(1000, 0111); /* enable ADC, not free running, interrupt disable, rate = 1/128 */
 }
 
 /* ------------------------------------------------------------------------- */
@@ -235,22 +152,27 @@ usbRequest_t    *rq = (void *)data;
 /* ------------------------ Oscillator Calibration ------------------------- */
 /* ------------------------------------------------------------------------- */
 
-/* Calibrate the RC oscillator to 8.25 MHz. The core clock of 16.5 MHz is
- * derived from the 66 MHz peripheral clock by dividing. Our timing reference
+/* Calibrate the RC oscillator to 8.25 MHz. The attiny85 PLL system clock 
+ * (with our target frequency F_CPU) of 16.5 MHz is
+ * derived from the 64 MHz PLL peripheral clock by scaling. Our timing reference
  * is the Start Of Frame signal (a single SE0 bit) available immediately after
  * a USB RESET. We first do a binary search for the OSCCAL value and then
  * optimize this value with a neighboorhod search.
- * This algorithm may also be used to calibrate the RC oscillator directly to
- * 12 MHz (no PLL involved, can therefore be used on almost ALL AVRs), but this
- * is wide outside the spec for the OSCCAL value and the required precision for
- * the 12 MHz clock! Use the RC oscillator calibrated to 12 MHz for
- * experimental purposes only!
  */
+
+/* Our target F_CPU is a little different for our gameboy experiments.
+ * The DMG  runs at 2^22 = 4194304, which leads to our target attiny-freq of 2^23=8388608
+ * This is only a 1.8% deviation to 8.25MHz to start with!
+ * Our USB derived target is thus 16.7~etc 
+ */
+
+#define F_CPU_TARGET 16777216
+
 static void calibrateOscillator(void)
 {
 uchar       step = 128;
 uchar       trialValue = 0, optimumValue;
-int         x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU / 10.5e6 + 0.5);
+int         x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU_TARGET / 10.5e6 + 0.5);
 
     /* do a binary search: */
     do{
@@ -305,7 +227,7 @@ int main(void)
 {
 uchar   i;
 uchar   calibrationValue;
-
+    
     calibrationValue = eeprom_read_byte(0); /* calibration value from last time */
     if(calibrationValue != 0xff){
         OSCCAL = calibrationValue;
@@ -316,24 +238,24 @@ uchar   calibrationValue;
         _delay_ms(15);
     }
     usbDeviceConnect();
-    // DDRB |= 1 << BIT_LED;   /* output for LED */
-    // PORTB |= 1 << BIT_KEY;  /* pull-up on key input */
+    
+    
     wdt_enable(WDTO_1S);
     timerInit();
-    // adcInit();
+
     usbInit();
     sei();
     for(;;){    /* main event loop */
         wdt_reset();
         usbPoll();
         if(usbInterruptIsReady() && nextDigit != NULL){ /* we can send another key */
-            buildReport();
-            usbSetInterrupt(reportBuffer, sizeof(reportBuffer));
-            if(*++nextDigit == 0xff)    /* this was terminator character */
-                nextDigit = NULL;
+            // buildReport();
+            // usbSetInterrupt(reportBuffer, sizeof(reportBuffer));
+            // if(*++nextDigit == 0xff)    /* this was terminator character */
+            //     nextDigit = NULL;
         }
-        timerPoll();
-        adcPoll();
+
     }
     return 0;
 }
+

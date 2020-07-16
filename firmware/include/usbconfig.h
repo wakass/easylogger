@@ -116,8 +116,8 @@ extern void usbEventResetReady(void);
  */
 
 /* -------------------------- Device Description --------------------------- */
-
-#define  USB_CFG_VENDOR_ID       0x42, 0x42
+ 
+#define  USB_CFG_VENDOR_ID       0x20, 0x10 //Labtec :O
 /* USB vendor ID for the device, low byte first. If you have registered your
  * own Vendor ID, define it here. Otherwise you use obdev's free shared
  * VID/PID pair. Be sure to read USBID-License.txt for rules!
