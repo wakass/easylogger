@@ -101,15 +101,30 @@ PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] 
 
 static void timerInit(void)
 {
-    TCCR0A = 1 << COM0A0; //Toggle OC0A on compare-match
-    TCCR0A |= 1 << WGM01; //CTC mode so that OCR0A controls match
-    TCCR0B  = 1 << CS00; //No prescaling i.e. scaling of clk_IO/1
+    TCCR0A  = 1 << COM0A0; //Toggle OC0A on compare-match
+    
+    //Normal mode now, 
+    // CTC mode (like the two lines below) 
+    // somehow threw of vusb into not synchronizing
+    // Even though no interrupts would be generated
+    // TCCR0A |= 1 << WGM01; //CTC mode so that OCR0A controls match/
+    // TIMSK = 1 << OCIE0A; //Enable timer counter compare match
 
-    TIMSK |= 1 << OCIE0A; //Enable timer counter compare match
-    OCR0A = 3; //TOP of timer counter 0; Generate interrupts on /4 speed
+    TCCR0B = 2 << CS00; //Scaling of clk_IO/8
+    // This with a TOP of 0xFF in normal mode means 
+    // the clock output on OC0A is clk/256/8
+
+    TIMSK &= ~(1<<TOIE0); //Clear the overflow interrupt enable
     DDRB |= 1 << DDB0;
-
+    
 }
+
+ISR(TIMER0_OVF_vect, ISR_NAKED)
+{
+    sei();
+    reti();
+}
+
 
 static void buildReport(void)
 {
@@ -166,8 +181,11 @@ usbRequest_t    *rq = (void *)data;
  * Our USB derived target is thus 16.7~etc 
  */
 
-#define F_CPU_TARGET 16777216
+#define F_CPU_TARGET F_CPU //16777216
 
+#define OLDSTYLECALIBRATION
+
+#ifdef OLDSTYLECALIBRATION
 static void calibrateOscillator(void)
 {
 uchar       step = 128;
@@ -197,6 +215,44 @@ int         x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU_TARGET 
     }
     OSCCAL = optimumValue;
 }
+#else
+
+
+//Taken from https://codeandlife.com/2012/02/22/v-usb-with-attiny45-attiny85-without-a-crystal/
+//Calibrates for attiny's overlapping OSCCAL regions, might give better results, might not :P
+#define abs(x) ((x) > 0 ? (x) : (-x))
+
+// Called by V-USB after device reset
+static void calibrateOscillator() {
+    int frameLength, targetLength = (unsigned)(1499 * (double)F_CPU_TARGET / 10.5e6 + 0.5);
+    int bestDeviation = 9999;
+    uchar trialCal, bestCal, step, region;
+
+    // do a binary search in regions 0-127 and 128-255 to get optimum OSCCAL
+    for(region = 0; region <= 1; region++) {
+        frameLength = 0;
+        trialCal = (region == 0) ? 0 : 128;
+        
+        for(step = 64; step > 0; step >>= 1) { 
+            if(frameLength < targetLength) // true for initial iteration
+                trialCal += step; // frequency too low
+            else
+                trialCal -= step; // frequency too high
+                
+            OSCCAL = trialCal;
+            frameLength = usbMeasureFrameLength();
+            
+            if(abs(frameLength-targetLength) < bestDeviation) {
+                bestCal = trialCal; // new optimum found
+                bestDeviation = abs(frameLength -targetLength);
+            }
+        }
+    }
+
+    OSCCAL = bestCal;
+}
+
+#endif //OLDSTYLECALIBRATION
 /*
 Note: This calibration algorithm may try OSCCAL values of up to 192 even if
 the optimum value is far below 192. It may therefore exceed the allowed clock
@@ -241,20 +297,22 @@ uchar   calibrationValue;
     
     
     wdt_enable(WDTO_1S);
-    timerInit();
-
+    
     usbInit();
+    timerInit();
     sei();
+
+    int counter = 0xFF;
     for(;;){    /* main event loop */
         wdt_reset();
         usbPoll();
-        if(usbInterruptIsReady() && nextDigit != NULL){ /* we can send another key */
+        if(usbInterruptIsReady()){ /* we can send another key */
+            if (counter !=0) counter--;
             // buildReport();
             // usbSetInterrupt(reportBuffer, sizeof(reportBuffer));
             // if(*++nextDigit == 0xff)    /* this was terminator character */
             //     nextDigit = NULL;
         }
-
     }
     return 0;
 }
