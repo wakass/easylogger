@@ -13,6 +13,7 @@
 #include <avr/eeprom.h>
 #include <avr/interrupt.h>
 #include <avr/pgmspace.h>
+#include <string.h>
 #include <util/delay.h>
 
 #include "usbdrv.h"
@@ -39,63 +40,38 @@ PB3, PB4 = USB data lines, see usbconfig.h
 static uchar    reportBuffer[2];    /* buffer for HID reports */
 static uchar    idleRate;           /* in 4 ms units */
 
-static uchar    *nextDigit;
+#define HIDSERIAL_INBUFFER_SIZE 32
+//Serial
+static uchar received = 0;
+static uchar outBuffer[8];
+static uchar inBuffer[HIDSERIAL_INBUFFER_SIZE];
+static uchar reportId = 0;
+static uchar bytesRemaining;
+static uchar* pos;
+
+
 
 /* ------------------------------------------------------------------------- */
 
-PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] = { /* USB report descriptor */
-    0x05, 0x01,                    // USAGE_PAGE (Generic Desktop)
-    0x09, 0x06,                    // USAGE (Keyboard)
+
+PROGMEM const char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] = {    /* USB report descriptor */
+    0x06, 0x00, 0xff,              // USAGE_PAGE (Generic Desktop)
+    0x09, 0x01,                    // USAGE (Vendor Usage 1)
     0xa1, 0x01,                    // COLLECTION (Application)
-    0x05, 0x07,                    //   USAGE_PAGE (Keyboard)
-    0x19, 0xe0,                    //   USAGE_MINIMUM (Keyboard LeftControl)
-    0x29, 0xe7,                    //   USAGE_MAXIMUM (Keyboard Right GUI)
     0x15, 0x00,                    //   LOGICAL_MINIMUM (0)
-    0x25, 0x01,                    //   LOGICAL_MAXIMUM (1)
-    0x75, 0x01,                    //   REPORT_SIZE (1)
-    0x95, 0x08,                    //   REPORT_COUNT (8)
-    0x81, 0x02,                    //   INPUT (Data,Var,Abs)
-    0x95, 0x01,                    //   REPORT_COUNT (1)
+    0x26, 0xff, 0x00,              //   LOGICAL_MAXIMUM (255)
     0x75, 0x08,                    //   REPORT_SIZE (8)
-    0x25, 0x65,                    //   LOGICAL_MAXIMUM (101)
-    0x19, 0x00,                    //   USAGE_MINIMUM (Reserved (no event indicated))
-    0x29, 0x65,                    //   USAGE_MAXIMUM (Keyboard Application)
-    0x81, 0x00,                    //   INPUT (Data,Ary,Abs)
+    0x95, 0x08,                    //   REPORT_COUNT (8)
+
+    0x09, 0x00,                    //   USAGE (Undefined)  
+    0x82, 0x02, 0x01,              //   INPUT (Data,Var,Abs,Buf)
+    0x95, HIDSERIAL_INBUFFER_SIZE, //   REPORT_COUNT (32)
+
+    0x09, 0x00,                    //   USAGE (Undefined)        
+    0xb2, 0x02, 0x01,              //   FEATURE (Data,Var,Abs,Buf)
     0xc0                           // END_COLLECTION
 };
-/* We use a simplifed keyboard report descriptor which does not support the
- * boot protocol. We don't allow setting status LEDs and we only allow one
- * simultaneous key press (except modifiers). We can therefore use short
- * 2 byte input reports.
- * The report descriptor has been created with usb.org's "HID Descriptor Tool"
- * which can be downloaded from http://www.usb.org/developers/hidpage/.
- * Redundant entries (such as LOGICAL_MINIMUM and USAGE_PAGE) have been omitted
- * for the second INPUT item.
- */
 
-/* Keyboard usage values, see usb.org's HID-usage-tables document, chapter
- * 10 Keyboard/Keypad Page for more codes.
- */
-#define MOD_CONTROL_LEFT    (1<<0)
-#define MOD_SHIFT_LEFT      (1<<1)
-#define MOD_ALT_LEFT        (1<<2)
-#define MOD_GUI_LEFT        (1<<3)
-#define MOD_CONTROL_RIGHT   (1<<4)
-#define MOD_SHIFT_RIGHT     (1<<5)
-#define MOD_ALT_RIGHT       (1<<6)
-#define MOD_GUI_RIGHT       (1<<7)
-
-#define KEY_1       30
-#define KEY_2       31
-#define KEY_3       32
-#define KEY_4       33
-#define KEY_5       34
-#define KEY_6       35
-#define KEY_7       36
-#define KEY_8       37
-#define KEY_9       38
-#define KEY_0       39
-#define KEY_RETURN  40
 
 /* ------------------------------------------------------------------------- */
 
@@ -126,16 +102,6 @@ ISR(TIMER0_OVF_vect, ISR_NAKED)
 }
 
 
-static void buildReport(void)
-{
-uchar   key = 0;
-
-    if(nextDigit != NULL){
-        key = *nextDigit;
-    }
-    reportBuffer[0] = 0;    /* no modifiers */
-    reportBuffer[1] = key;
-}
 
 /* ------------------------------------------------------------------------- */
 /* ------------------------ interface to USB driver ------------------------ */
@@ -149,13 +115,20 @@ usbRequest_t    *rq = (void *)data;
     if((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS){    /* class request type */
         if(rq->bRequest == USBRQ_HID_GET_REPORT){  /* wValue: ReportType (highbyte), ReportID (lowbyte) */
             /* we only have one report type, so don't look at wValue */
-            buildReport();
-            return sizeof(reportBuffer);
+            
+            return USB_NO_MSG;
         }else if(rq->bRequest == USBRQ_HID_GET_IDLE){
             usbMsgPtr = &idleRate;
             return 1;
         }else if(rq->bRequest == USBRQ_HID_SET_IDLE){
             idleRate = rq->wValue.bytes[1];
+        }else if(rq->bRequest == USBRQ_HID_SET_REPORT){
+            /* since we have only one report type, we can ignore the report-ID */
+            pos = inBuffer;
+            bytesRemaining = rq->wLength.word;
+            if(bytesRemaining > sizeof(inBuffer))
+                bytesRemaining = sizeof(inBuffer);
+            return USB_NO_MSG;  /* use usbFunctionWrite() to receive data from host */
         }
     }else{
         /* no vendor specific requests implemented */
@@ -275,6 +248,60 @@ void    usbEventResetReady(void)
     eeprom_write_byte(0, OSCCAL);   /* store the calibrated value in EEPROM */
 }
 
+/* usbFunctionWrite() is called when the host sends a chunk of data to the
+ * device. For more information see the documentation in usbdrv/usbdrv.h.
+ */
+uchar   usbFunctionWrite(uchar *data, uchar len)
+{
+    if (reportId == 0) {
+        int i;
+        if(len > bytesRemaining)
+            len = bytesRemaining;
+        bytesRemaining -= len;
+        //int start = (pos==inBuffer)?1:0;
+        for(i=0;i<len;i++) {
+            if (data[i]!=0) {
+                *pos++ = data[i];
+             }
+        }
+        if (bytesRemaining == 0) {
+            received = 1;
+            *pos++ = 0;
+            return 1;
+        } else {
+            return 0;
+        }
+    } else {
+        return 1;
+    }
+}
+
+size_t serial_read(uchar *buffer)
+{
+    if(received == 0) return 0;
+    int i;
+    for(i=0;inBuffer[i]!=0&&i<HIDSERIAL_INBUFFER_SIZE;i++)
+    {
+        buffer[i] = inBuffer[i];
+    }
+    inBuffer[0] = 0;
+    buffer[i] = 0;
+    received = 0;
+    return i;
+}
+
+// write one character
+size_t serial_write(uint8_t data)
+{
+  while(!usbInterruptIsReady()) {
+    usbPoll();
+  }
+  memset((void*)outBuffer, 0, 8);
+  outBuffer[0] = data;
+  usbSetInterrupt(outBuffer, 8);
+  return 1;
+}
+
 /* ------------------------------------------------------------------------- */
 /* --------------------------------- main ---------------------------------- */
 /* ------------------------------------------------------------------------- */
@@ -309,7 +336,7 @@ uchar   calibrationValue;
         if(usbInterruptIsReady()){ /* we can send another key */
             if (counter !=0) counter--;
             // buildReport();
-            // usbSetInterrupt(reportBuffer, sizeof(reportBuffer));
+            // usbSetInterrupt(reportBuffer, suizeof(reportBuffer));
             // if(*++nextDigit == 0xff)    /* this was terminator character */
             //     nextDigit = NULL;
         }
