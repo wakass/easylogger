@@ -19,7 +19,7 @@ else:
 # set the active configuration. With no arguments, the first
 # configuration will be the active one
 #dev.set_configuration()
-##dev.reset()
+#dev.reset()
 
 # get an endpoint instance
 cfg = dev.get_active_configuration()
@@ -43,12 +43,17 @@ def hid_set_report(dev, report):
           0x200, 0x00,
           report)
       
-for x in range(10):
+for x in range(1):
     try:
         hid_set_report(dev,'a')
         data = hid_get_report(dev)
+
+        framelength = data[0] + (data[1]<<8)
+        fcpu = (framelength - 0.5) * 10.5e6 / 1499
+
         
-        print(data)
+        print("CPU freq: {} Mhz, framelength: {} ".format(fcpu/1e6,framelength))
+#        print(data)
     except Exception as e:
         print('had except',e)
         pass

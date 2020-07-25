@@ -49,6 +49,7 @@ static uchar inBuffer[HIDSERIAL_INBUFFER_SIZE];
 static uchar reportId = 0;
 static uchar bytesRemaining;
 static uchar* pos;
+static uint16_t    fcpu = 0;
 
 
 
@@ -144,7 +145,7 @@ void    usbEventResetReady(void)
      * usbMeasureFrameLength() counts CPU cycles.
      */
     cli();
-    calibrateOscillator();
+    fcpu = calibrateOscillator();
     sei();
     eeprom_write_byte(0, OSCCAL);   /* store the calibrated value in EEPROM */
 }
@@ -154,10 +155,10 @@ void    usbEventResetReady(void)
  */
 uchar   usbFunctionRead(uchar *data, uchar len)
 {
-    data[0] = OSCCAL;
-    data[1] = inBuffer[0];
-    data[2] = 0xDE;
-    data[3] = 0xAD;
+    data[0] = fcpu & 0xFF;
+    data[1] = (fcpu & 0xFF00) >> 8;
+    data[2] = OSCCAL;
+    data[3] = inBuffer[0];
     return 4;
 }
 
