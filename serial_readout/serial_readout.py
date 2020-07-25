@@ -48,11 +48,14 @@ for x in range(1):
         hid_set_report(dev,'a')
         data = hid_get_report(dev)
 
-        framelength = data[0] + (data[1]<<8)
-        fcpu = (framelength - 0.5) * 10.5e6 / 1499
-
+        framelength_usb = data[0] + (data[1]<<8)
+        framelength_target = data[2] + (data[3]<<8)
         
-        print("CPU freq: {} Mhz, framelength: {} ".format(fcpu/1e6,framelength))
+        fcpu_usb = (framelength_usb - 0.5) * 10.5e6 / 1499
+        fcpu_target = (framelength_target - 0.5) * 10.5e6 / 1499        
+        
+        print("CPU USB freq: {} Mhz, framelength: {} ".format(fcpu_usb/1e6,framelength_usb))
+        print("CPU GB freq: {} Mhz, framelength: {} ".format(fcpu_target/1e6,framelength_target))
 #        print(data)
     except Exception as e:
         print('had except',e)

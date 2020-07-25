@@ -12,7 +12,8 @@
 #include "usbdrv.h"
 #include "oddebug.h"
 
-#define F_CPU_TARGET F_CPU //16777216
+#define F_CPU_USB F_CPU
+#define F_CPU_TARGET 16777216
 #define OLDSTYLECALIBRATION
 
 /* ------------------------------------------------------------------------- */
@@ -35,11 +36,11 @@
 
 
 #ifdef OLDSTYLECALIBRATION
-static uint16_t calibrateOscillator(void)
+static uint16_t calibrateOscillator(double f_target, uint8_t* osccal_target)
 {
 uchar       step = 128;
 uchar       trialValue = 0, optimumValue;
-int         x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU_TARGET / 10.5e6 + 0.5);
+int         x, optimumDev, targetValue = (unsigned)(1499 * (double)f_target / 10.5e6 + 0.5);
 
     /* do a binary search: */
     do{
@@ -63,6 +64,7 @@ int         x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU_TARGET 
         }
     }
     OSCCAL = optimumValue;
+    *osccal_target = optimumValue;
 
     return optimumDev+targetValue; // Return the measured framelength
 }

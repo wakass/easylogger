@@ -49,7 +49,8 @@ static uchar inBuffer[HIDSERIAL_INBUFFER_SIZE];
 static uchar reportId = 0;
 static uchar bytesRemaining;
 static uchar* pos;
-static uint16_t    fcpu = 0;
+static uint16_t    fcpu_usb = 0;
+static uint16_t    fcpu_target  = 0;
 
 
 
@@ -145,9 +146,15 @@ void    usbEventResetReady(void)
      * usbMeasureFrameLength() counts CPU cycles.
      */
     cli();
-    fcpu = calibrateOscillator();
+    uint8_t osccal_target;
+    uint8_t osccal_usb;
+    fcpu_target = calibrateOscillator(F_CPU_TARGET, &osccal_target); //Do this first since OSCCAL is set by calibrate
+    fcpu_usb = calibrateOscillator(F_CPU_USB, &osccal_usb);
     sei();
-    eeprom_write_byte(0, OSCCAL);   /* store the calibrated value in EEPROM */
+    
+    /* store only the calibrated real target value in EEPROM */
+    eeprom_write_byte(0, osccal_target);   
+    
 }
 
 /* usbFunctionRead() is called when the host requests a chunk of data from
@@ -155,11 +162,12 @@ void    usbEventResetReady(void)
  */
 uchar   usbFunctionRead(uchar *data, uchar len)
 {
-    data[0] = fcpu & 0xFF;
-    data[1] = (fcpu & 0xFF00) >> 8;
-    data[2] = OSCCAL;
-    data[3] = inBuffer[0];
-    return 4;
+    data[0] = fcpu_usb & 0xFF;
+    data[1] = (fcpu_usb & 0xFF00) >> 8;
+    data[2] = fcpu_target & 0xFF;
+    data[3] = (fcpu_target & 0xFF00) >> 8;
+    data[4] = OSCCAL;
+    return 5;
 }
 
 /* usbFunctionWrite() is called when the host sends a chunk of data to the
