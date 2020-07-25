@@ -81,12 +81,12 @@
  * The value is in milliamperes. [It will be divided by two since USB
  * communicates power requirements in units of 2 mA.]
  */
-#define USB_CFG_IMPLEMENT_FN_WRITE      0
+#define USB_CFG_IMPLEMENT_FN_WRITE      1
 /* Set this to 1 if you want usbFunctionWrite() to be called for control-out
  * transfers. Set it to 0 if you don't need it and want to save a couple of
  * bytes.
  */
-#define USB_CFG_IMPLEMENT_FN_READ       0
+#define USB_CFG_IMPLEMENT_FN_READ       1
 /* Set this to 1 if you need to send control replies which are generated
  * "on the fly" when usbFunctionRead() is called. If you only want to send
  * data from a static buffer, set it to 0 and return the data from
@@ -117,14 +117,14 @@ extern void usbEventResetReady(void);
 
 /* -------------------------- Device Description --------------------------- */
  
-#define  USB_CFG_VENDOR_ID       0x20, 0x10 //Labtec :O
+#define  USB_CFG_VENDOR_ID       0xad, 0xde //Labtec :O
 /* USB vendor ID for the device, low byte first. If you have registered your
  * own Vendor ID, define it here. Otherwise you use obdev's free shared
  * VID/PID pair. Be sure to read USBID-License.txt for rules!
  * This template uses obdev's shared VID/PID pair for HIDs: 0x16c0/0x5df.
  * Use this VID/PID pair ONLY if you understand the implications!
  */
-#define  USB_CFG_DEVICE_ID       0x31, 0xe1
+#define  USB_CFG_DEVICE_ID       0xef, 0xbe
 /* This is the ID of the product, low byte first. It is interpreted in the
  * scope of the vendor ID. If you have registered your own VID with usb.org
  * or if you have licensed a PID from somebody else, define it here. Otherwise
